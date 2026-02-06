@@ -11,24 +11,28 @@ Esta atualização implementa um **sistema robusto de identificação única de 
 ### **Sistema de ID Único com Hash MD5**
 
 #### ❌ Versão Anterior (v1.0)
+
 ```python
 # ID baseado apenas em 3-4 campos visíveis
 id_unico = f"{num_guia}_{data_guia}_{tipo_guia}_{nome_beneficiario}_{indice}"
 ```
 
 **Problemas:**
+
 - ⚠️ Campos vazios geravam IDs idênticos
 - ⚠️ Índice mudava ao recarregar tabela
 - ⚠️ Guias do mesmo paciente podiam ser confundidas
 - ⚠️ Sem proteção contra downloads simultâneos
 
 #### ✅ Versão Atual (v2.0)
+
 ```python
 # ID baseado em TODOS os campos + timestamp + hash
 id_final, id_completo = gerar_id_unico_robusto(colunas, nome_beneficiario, indice)
 ```
 
 **Melhorias:**
+
 - ✅ Extrai dados de **8 colunas** da tabela
 - ✅ Adiciona **timestamp com microsegundos**
 - ✅ Gera **hash MD5** para garantir unicidade
@@ -47,12 +51,12 @@ id_final, id_completo = gerar_id_unico_robusto(colunas, nome_beneficiario, indic
 def gerar_id_unico_robusto(colunas, nome_beneficiario, indice):
     """
     Gera um ID único robusto usando hash de todos os campos disponíveis.
-    
+
     Args:
         colunas: Lista de elementos td da linha
         nome_beneficiario: Nome do beneficiário
         indice: Índice da linha na tabela
-    
+
     Returns:
         tuple: (id_final, id_completo)
             - id_final: Nome curto + hash MD5 (ex: "JOAO_SILVA_a3f9e2b4c1d5")
@@ -90,11 +94,11 @@ def gerar_id_unico_robusto(colunas, nome_beneficiario, indice):
 
 **Dados na Tabela:**
 
-| # | Número Guia | Data | Tipo | Nome | Status |
-|---|-------------|------|------|------|--------|
-| 1 | 000123 | 04/12/2025 | SADT | JOÃO DA SILVA | Liberada |
-| 2 | 000124 | 04/12/2025 | SADT | JOÃO DA SILVA | Liberada |
-| 3 | 000125 | 04/12/2025 | SADT | JOÃO DA SILVA | Liberada |
+| #   | Número Guia | Data       | Tipo | Nome          | Status   |
+| --- | ----------- | ---------- | ---- | ------------- | -------- |
+| 1   | 000123      | 04/12/2025 | SADT | JOÃO DA SILVA | Liberada |
+| 2   | 000124      | 04/12/2025 | SADT | JOÃO DA SILVA | Liberada |
+| 3   | 000125      | 04/12/2025 | SADT | JOÃO DA SILVA | Liberada |
 
 **IDs Gerados:**
 
@@ -118,6 +122,7 @@ Guia 3: JOAO_DA_SILVA_9d4e5f6a7b8c  (timestamp: 14:30:27.984674)
 ## 🛡️ Proteções Implementadas
 
 ### 1. **Contra Duplicação**
+
 ```python
 if id_final in guias_processadas:
     logger.warning(f"*** PULANDO (JA PROCESSADA) ***")
@@ -127,6 +132,7 @@ guias_processadas.add(id_final)
 ```
 
 ### 2. **Contra Campos Vazios**
+
 ```python
 for idx in range(min(8, len(colunas))):
     try:
@@ -140,12 +146,14 @@ for idx in range(min(8, len(colunas))):
 ```
 
 ### 3. **Contra Race Conditions**
+
 ```python
 # Timestamp com microsegundos
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 ```
 
 ### 4. **Contra IDs Longos**
+
 ```python
 # Hash MD5 mantém IDs curtos
 id_hash = hashlib.md5(id_completo.encode('utf-8')).hexdigest()[:16]
@@ -183,14 +191,14 @@ id_final = f"{nome_curto}_{id_hash}"
 
 ## 🔍 Comparação Técnica
 
-| Aspecto | v1.0 | v2.0 |
-|---------|------|------|
-| **Campos usados** | 3-4 campos | 8 campos + timestamp |
-| **Proteção temporal** | ❌ Não | ✅ Microsegundos |
-| **Tamanho do ID** | Variável (longo) | Fixo (curto) |
-| **Hash** | ❌ Não | ✅ MD5 (16 chars) |
-| **Debug** | Básico | Detalhado |
-| **Colisão possível?** | ⚠️ Sim (raro) | ✅ Impossível |
+| Aspecto               | v1.0             | v2.0                 |
+| --------------------- | ---------------- | -------------------- |
+| **Campos usados**     | 3-4 campos       | 8 campos + timestamp |
+| **Proteção temporal** | ❌ Não           | ✅ Microsegundos     |
+| **Tamanho do ID**     | Variável (longo) | Fixo (curto)         |
+| **Hash**              | ❌ Não           | ✅ MD5 (16 chars)    |
+| **Debug**             | Básico           | Detalhado            |
+| **Colisão possível?** | ⚠️ Sim (raro)    | ✅ Impossível        |
 
 ---
 
@@ -214,7 +222,7 @@ O uso permanece idêntico à versão anterior:
 chrome.exe --remote-debugging-port=9222
 
 # 2. Execute o script
-python automacao_bradesco_corrigido.py
+python script2.py
 ```
 
 ### Configuração
@@ -233,6 +241,7 @@ data_final = "04/12/2025"
 ## 🧪 Testes Recomendados
 
 ### Teste 1: Múltiplas Guias do Mesmo Paciente
+
 ```
 ✅ Objetivo: Verificar se todas são baixadas com nomes únicos
 ✅ Como: Processe 3-5 guias do mesmo beneficiário
@@ -241,6 +250,7 @@ data_final = "04/12/2025"
 ```
 
 ### Teste 2: Reprocessamento
+
 ```
 ✅ Objetivo: Verificar se detecta guias já processadas
 ✅ Como: Execute o script 2x no mesmo período
@@ -249,6 +259,7 @@ data_final = "04/12/2025"
 ```
 
 ### Teste 3: Recarga de Tabela
+
 ```
 ✅ Objetivo: Verificar estabilidade após reload
 ✅ Como: Deixe o script rodar em período com muitas guias
@@ -263,14 +274,17 @@ data_final = "04/12/2025"
 ### Casos de Uso Real
 
 **Cenário A: 50 guias do mesmo paciente**
+
 - ❌ v1.0: 3-5 duplicações detectadas
 - ✅ v2.0: 0 duplicações, 50 arquivos únicos
 
 **Cenário B: Processamento interrompido + retomado**
+
 - ❌ v1.0: Reprocessava 10-15 guias
 - ✅ v2.0: Detecta 100% das já processadas
 
 **Cenário C: Download simultâneo (2 guias/segundo)**
+
 - ❌ v1.0: Potencial sobrescrita
 - ✅ v2.0: Timestamp em microsegundos previne colisão
 
@@ -279,6 +293,7 @@ data_final = "04/12/2025"
 ## 🐛 Troubleshooting
 
 ### Problema: "Guia adicionada mas arquivo não baixou"
+
 ```python
 # Verifique nos logs:
 [DEBUG] ID único gerado: NOME_hash123456  ← ID foi gerado
@@ -290,6 +305,7 @@ data_final = "04/12/2025"
 ```
 
 ### Problema: "Total processadas não bate com arquivos"
+
 ```python
 # Verifique:
 [i] Total guias deste paciente: 5        ← Downloads bem-sucedidos
@@ -300,6 +316,7 @@ data_final = "04/12/2025"
 ```
 
 ### Problema: Logs muito grandes
+
 ```python
 # Reduza o nível de logging:
 logging.basicConfig(level=logging.WARNING)  # Em vez de INFO
@@ -315,8 +332,8 @@ logging.basicConfig(level=logging.WARNING)  # Em vez de INFO
 ### Estrutura do ID Completo
 
 ```
-Campo 0 (vazio) + Campo 1 (num_guia) + Campo 2 (data) + Campo 3 (tipo) + 
-Campo 4 (nome) + Campo 5 (status) + Campo 6 (vazio) + Campo 7 (vazio) + 
+Campo 0 (vazio) + Campo 1 (num_guia) + Campo 2 (data) + Campo 3 (tipo) +
+Campo 4 (nome) + Campo 5 (status) + Campo 6 (vazio) + Campo 7 (vazio) +
 Índice + Timestamp
     ↓
 Hash MD5
@@ -336,6 +353,7 @@ ID Final: NomeCurto_Hash16
 ## 🎯 Próximas Melhorias Sugeridas
 
 ### Versão 2.1 (Futuro)
+
 - [ ] Validação de integridade de PDF (PyPDF2)
 - [ ] Sistema de retry com lock de arquivo
 - [ ] Relatório HTML ao final da execução
@@ -343,6 +361,7 @@ ID Final: NomeCurto_Hash16
 - [ ] Modo agendado (CRON/Task Scheduler)
 
 ### Versão 3.0 (Longo Prazo)
+
 - [ ] Multi-threading para downloads simultâneos
 - [ ] Banco de dados SQLite para histórico
 - [ ] API REST para integração
