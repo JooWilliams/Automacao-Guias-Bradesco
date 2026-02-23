@@ -9,26 +9,34 @@ import time
 import logging
 from pathlib import Path
 import re
+import hashlib
+from datetime import datetime
 
 # ========================== CONFIGURAÇÕES ==========================
 
-# Pasta Downloads
 PASTA_DOWNLOADS = Path.home() / "Downloads"
 
-# Códigos a serem processados
 CODIGOS = ["0000994402"]
-#CODIGOS = ["0000938246"]
 
-# Timeouts configuráveis
-TIMEOUT_CURTO = 10
-TIMEOUT_MEDIO = 20
-TIMEOUT_LONGO = 30
+DATA_INICIAL = "19/02/2026"
+DATA_FINAL = "19/02/2026"
+
+# Timeouts reduzidos para maior agilidade
+TIMEOUT_CURTO = 7
+TIMEOUT_MEDIO = 15
+TIMEOUT_LONGO = 25
+
+# Sleeps configuráveis (centralizados para fácil ajuste)
+SLEEP_MINIMO = 0.1
+SLEEP_CURTO = 0.2
+SLEEP_MEDIO = 0.5
+SLEEP_LONGO = 1.0
 
 # Controle de guias processadas
 guias_por_paciente = {}
 guias_processadas = set()
 
-# Configuração de logging
+# Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -42,593 +50,517 @@ logger = logging.getLogger(__name__)
 # ========================== EXCEÇÕES ==========================
 
 class AutomacaoError(Exception):
-    """Exceção base para erros de automação"""
     pass
 
 class ElementoNaoEncontradoError(AutomacaoError):
-    """Elemento não encontrado na página"""
     pass
 
 # ========================== FUNÇÕES AUXILIARES ==========================
 
 def limpar_nome_arquivo(nome):
-    """Remove caracteres inválidos do nome do arquivo."""
-    caracteres_invalidos = r'[<>:"/\\|?*]'
-    nome_limpo = re.sub(caracteres_invalidos, '', nome)
+    nome_limpo = re.sub(r'[<>:"/\\|?*]', '', nome)
     nome_limpo = ' '.join(nome_limpo.split())
-    nome_limpo = nome_limpo[:100]
-    return nome_limpo.strip() or "guia_sem_nome"
+    return (nome_limpo[:100].strip()) or "guia_sem_nome"
 
 
-def aguardar_e_clicar(driver, by, value, timeout=TIMEOUT_MEDIO):
-    """Aguarda elemento estar clicável e clica nele usando JavaScript."""
+def aguardar_e_clicar(driver, by, value, timeout=None):
+    if timeout is None:
+        timeout = TIMEOUT_MEDIO
     try:
         elemento = WebDriverWait(driver, timeout).until(
             EC.element_to_be_clickable((by, value))
         )
-        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", elemento)
-        time.sleep(0.3)
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", elemento)
         driver.execute_script("arguments[0].click();", elemento)
         return elemento
     except TimeoutException:
         raise ElementoNaoEncontradoError(f"Elemento nao encontrado: {by}={value}")
 
 
-def verificar_e_tratar_erro_interno(driver, aba_trabalho):
-    """
-    Verifica se apareceu a página de Erro Interno do Bradesco e clica em Voltar.
-    Returns: bool - True se encontrou e tratou erro, False caso contrário
-    """
+def verificar_saude_pagina(driver, aba_trabalho):
+    """Verificação unificada de erros (interno + modais)."""
     try:
-        # Verifica se está na URL de erro
         url_atual = driver.current_url
         if "erroAutenticacao" in url_atual or "ErroInterno" in url_atual:
-            logger.warning("[!] Pagina de ERRO INTERNO detectada!")
-            
-            # Tenta clicar no botão Voltar
+            logger.warning("Erro interno detectado na URL")
             try:
-                botao_voltar = driver.find_element(By.XPATH, "//button[contains(@onclick, 'fnVoltar')]")
-                if botao_voltar.is_displayed():
-                    driver.execute_script("arguments[0].click();", botao_voltar)
-                    logger.info("[OK] Botao 'Voltar' do erro clicado")
-                    time.sleep(2)
-                    
-                    # Volta para aba de trabalho
+                botao = driver.find_element(By.XPATH,
+                    "//button[contains(@onclick,'fnVoltar') or contains(text(),'Voltar')]")
+                if botao.is_displayed():
+                    driver.execute_script("arguments[0].click();", botao)
+                    time.sleep(SLEEP_LONGO)
                     driver.switch_to.window(aba_trabalho)
                     return True
             except NoSuchElementException:
                 pass
-        
-        # Verifica se há texto "Erro Interno" na página
-        try:
-            erro_interno = driver.find_element(By.XPATH, "//*[contains(text(), 'Erro Interno')]")
-            if erro_interno.is_displayed():
-                logger.warning("[!] Texto 'Erro Interno' encontrado na pagina!")
-                
-                # Procura botão Voltar
-                try:
-                    botao_voltar = driver.find_element(By.XPATH, "//button[contains(@onclick, 'fnVoltar') or contains(text(), 'Voltar')]")
-                    driver.execute_script("arguments[0].click();", botao_voltar)
-                    logger.info("[OK] Botao 'Voltar' clicado")
-                    time.sleep(2)
-                    
-                    driver.switch_to.window(aba_trabalho)
-                    return True
-                except NoSuchElementException:
-                    logger.error("[X] Botao 'Voltar' nao encontrado")
-        except NoSuchElementException:
-            pass
-        
-        # Verifica mensagem específica de autenticação
-        try:
-            msg_erro = driver.find_element(By.XPATH, "//*[contains(text(), 'Falha de autenticação no filtro de usuário do sistema')]")
-            if msg_erro.is_displayed():
-                logger.warning("[!] Erro de autenticacao detectado!")
-                
-                # Clica em Voltar
-                try:
-                    botao_voltar = driver.find_element(By.XPATH, "//button[contains(text(), 'Voltar')]")
-                    driver.execute_script("arguments[0].click();", botao_voltar)
-                    logger.info("[OK] Botao 'Voltar' clicado")
-                    time.sleep(2)
-                    
-                    driver.switch_to.window(aba_trabalho)
-                    return True
-                except:
-                    pass
-        except NoSuchElementException:
-            pass
-        
-        return False
-        
-    except Exception as e:
-        logger.debug(f"Erro ao verificar erro interno: {e}")
-        return False
 
-def verificar_e_fechar_modal_erro(driver):
-    """Verifica e fecha modais de erro do Bradesco automaticamente."""
-    try:
-        seletores_modal = [
-            "//button[contains(text(), 'Fechar')]",
-            "//button[contains(text(), 'OK')]",
-            "//button[contains(text(), 'Continuar')]",
-            "//button[@class='close']",
-            "//*[contains(@class, 'modal')]//button[@type='button']",
-        ]
-        
-        for seletor in seletores_modal:
+        for texto_erro in ['Erro Interno', 'Falha de autenticação no filtro']:
             try:
-                botao_fechar = driver.find_element(By.XPATH, seletor)
-                if botao_fechar.is_displayed():
+                elem = driver.find_element(By.XPATH, f"//*[contains(text(), '{texto_erro}')]")
+                if elem.is_displayed():
+                    logger.warning(f"Erro: '{texto_erro}'")
                     try:
-                        modal_parent = botao_fechar.find_element(By.XPATH, "./ancestor::div[contains(@class, 'modal') or contains(@class, 'dialog')][1]")
-                        mensagem = modal_parent.text.strip()[:200]
-                        logger.warning(f"[!] Modal de erro: {mensagem}")
-                    except:
-                        logger.warning(f"[!] Modal de erro detectado")
-                    
-                    driver.execute_script("arguments[0].click();", botao_fechar)
-                    logger.info("[OK] Modal fechado automaticamente")
-                    time.sleep(0.5)
-                    return True
-            except (NoSuchElementException, Exception):
+                        botao = driver.find_element(By.XPATH,
+                            "//button[contains(@onclick,'fnVoltar') or contains(text(),'Voltar')]")
+                        driver.execute_script("arguments[0].click();", botao)
+                        time.sleep(SLEEP_LONGO)
+                        driver.switch_to.window(aba_trabalho)
+                        return True
+                    except NoSuchElementException:
+                        pass
+            except NoSuchElementException:
                 continue
-        
+
+        for seletor in [
+            "//button[contains(text(),'Fechar')]",
+            "//button[contains(text(),'OK')]",
+            "//button[contains(text(),'Continuar')]",
+            "//button[@class='close']",
+        ]:
+            try:
+                botao = driver.find_element(By.XPATH, seletor)
+                if botao.is_displayed():
+                    logger.warning("Modal de erro fechado")
+                    driver.execute_script("arguments[0].click();", botao)
+                    time.sleep(SLEEP_CURTO)
+                    return True
+            except NoSuchElementException:
+                continue
+
         return False
-        
-    except Exception as e:
-        logger.debug(f"Erro ao verificar modal: {e}")
+    except Exception:
         return False
 
 
 def fechar_aba_about_blank(driver, aba_trabalho):
-    """Fecha abas about:blank abertas pelo Chrome."""
     try:
-        abas_atuais = driver.window_handles
-        
-        for aba in abas_atuais:
+        for aba in driver.window_handles:
             if aba != aba_trabalho:
                 try:
                     driver.switch_to.window(aba)
-                    url_atual = driver.current_url
-                    
-                    if url_atual == "about:blank" or url_atual.startswith("about:"):
+                    if driver.current_url.startswith("about:"):
                         driver.close()
-                        logger.info("   [i] Aba about:blank fechada")
                 except Exception:
                     pass
-        
         driver.switch_to.window(aba_trabalho)
-        
-    except Exception as e:
-        logger.warning(f"Erro ao fechar abas: {e}")
+    except Exception:
+        pass
 
 
 def validar_formato_data(data):
-    """Valida se a data está no formato DD/MM/AAAA."""
     if not data or len(data) != 10:
         return False
-    
     try:
         partes = data.split('/')
         if len(partes) != 3:
             return False
-        
-        dia, mes, ano = partes
-        if not (dia.isdigit() and mes.isdigit() and ano.isdigit()):
-            return False
-        
-        dia, mes, ano = int(dia), int(mes), int(ano)
-        
-        if not (1 <= dia <= 31 and 1 <= mes <= 12 and 1900 <= ano <= 2100):
-            return False
-        
-        return True
+        dia, mes, ano = int(partes[0]), int(partes[1]), int(partes[2])
+        return 1 <= dia <= 31 and 1 <= mes <= 12 and 1900 <= ano <= 2100
     except:
         return False
 
 
+def gerar_id_unico_robusto(colunas, nome_beneficiario, indice):
+    campos_id = []
+    for idx in range(min(8, len(colunas))):
+        try:
+            texto = colunas[idx].text.strip()
+            campos_id.append(texto if texto else f"col{idx}_vazio")
+        except:
+            campos_id.append(f"col{idx}_erro")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    id_completo = f"{'_'.join(campos_id)}_{indice}_{timestamp}"
+    id_hash = hashlib.md5(id_completo.encode('utf-8')).hexdigest()[:16]
+    id_final = f"{nome_beneficiario[:20].strip()}_{id_hash}"
+    return id_final, id_completo
+
+
+def _extrair_nome(colunas, linha=None):
+    """Extrai nome do beneficiário. Tenta colunas primeiro, depois onclick do radio."""
+    # Método 1: Texto das colunas
+    for idx in [4, 3, 5, 6, 7]:
+        try:
+            nome = colunas[idx].text.strip()
+            if nome and len(nome) > 3:
+                return nome
+        except:
+            continue
+
+    # Método 2: Extrair do atributo onclick do radio (mais confiável)
+    try:
+        radio = (linha or colunas[0]).find_element(By.CSS_SELECTOR, "input[type='radio']")
+        onclick = radio.get_attribute("onclick") or ""
+        match = re.search(r"nomeSegurado=([^&]+)", onclick)
+        if match:
+            nome = match.group(1).strip()
+            if nome and len(nome) > 3:
+                return nome
+    except:
+        pass
+
+    return "DESCONHECIDO"
+
+
 # ========================== DOWNLOAD ==========================
 
-def renomear_guia_sadt_imediato(nome_base, max_tentativas=20):
-    """
-    Renomeia GuiaSADT.pdf diretamente na pasta Downloads.
-    O Chrome já baixou o arquivo instantaneamente.
-    """
-    logger.info("   [.] Procurando GuiaSADT.pdf...")
-    
+def renomear_guia_sadt_imediato(nome_base, max_tentativas=30):
+    arquivo_guia = PASTA_DOWNLOADS / "GuiaSADT.pdf"
+
     for tentativa in range(max_tentativas):
         try:
-            arquivo_guia = PASTA_DOWNLOADS / "GuiaSADT.pdf"
-            
-            if arquivo_guia.exists():
-                logger.info(f"   [OK] GuiaSADT.pdf encontrado! (tentativa {tentativa + 1})")
-                time.sleep(0.2)
-                
-                # Valida PDF
+            if arquivo_guia.exists() and arquivo_guia.stat().st_size > 100:
                 try:
                     with open(arquivo_guia, 'rb') as f:
-                        header = f.read(4)
-                        if not header.startswith(b'%PDF'):
-                            logger.warning(f"   [!] Arquivo nao e PDF valido")
-                            time.sleep(0.5)
+                        if not f.read(4).startswith(b'%PDF'):
+                            time.sleep(SLEEP_MINIMO)
                             continue
-                except Exception as e:
-                    logger.warning(f"   [!] Erro ao ler arquivo: {e}")
-                    time.sleep(0.5)
+                except (PermissionError, IOError):
+                    time.sleep(SLEEP_MINIMO)
                     continue
-                
-                # Controla numeração
+
                 if nome_base not in guias_por_paciente:
                     guias_por_paciente[nome_base] = 0
-                
                 guias_por_paciente[nome_base] += 1
                 numero_guia = guias_por_paciente[nome_base]
-                
-                # Nome final (na mesma pasta Downloads)
+
                 nome_final = f"{nome_base}_{numero_guia}.pdf"
                 destino = PASTA_DOWNLOADS / nome_final
-                
+
                 contador_extra = 1
                 while destino.exists():
-                    nome_final = f"{nome_base}_{numero_guia}_{contador_extra}.pdf"
+                    nome_final = f"{nome_base}_{numero_guia}_v{contador_extra}.pdf"
                     destino = PASTA_DOWNLOADS / nome_final
                     contador_extra += 1
-                
-                # Renomeia (move na mesma pasta)
+
                 for retry in range(5):
                     try:
                         arquivo_guia.rename(destino)
                         tamanho_kb = destino.stat().st_size / 1024
-                        logger.info(f"   [OK] Renomeado: {nome_final} ({tamanho_kb:.1f} KB)")
-                        return True
+                        return True, nome_final, tamanho_kb, numero_guia
                     except PermissionError:
-                        if retry < 4:
-                            logger.info(f"   [.] Arquivo travado, retry {retry + 1}/5...")
-                            time.sleep(0.5)
-                        else:
-                            logger.error(f"   [X] Nao foi possivel renomear (arquivo travado)")
-                            return False
+                        time.sleep(SLEEP_CURTO)
                     except Exception as e:
-                        logger.error(f"   [X] Erro ao renomear: {e}")
-                        return False
-            
-            time.sleep(0.5)
-            
-        except Exception as e:
-            logger.debug(f"   Erro tentativa {tentativa + 1}: {e}")
-            time.sleep(0.5)
-    
-    logger.warning(f"   [!] GuiaSADT.pdf nao encontrado apos {max_tentativas} tentativas")
-    return False
+                        logger.error(f"Erro ao renomear: {e}")
+                        return False, None, 0, 0
+
+                return False, None, 0, 0
+
+            time.sleep(0.15)
+        except Exception:
+            time.sleep(0.15)
+
+    return False, None, 0, 0
 
 
 # ========================== CHROME ==========================
 
 def conectar_chrome_existente():
-    """Conecta ao Chrome já aberto."""
-    logger.info("[+] Conectando ao Chrome existente...")
-    
+    logger.info("Conectando ao Chrome...")
     try:
         chrome_options = Options()
-        chrome_options.debugger_address = "localhost:9222"
-        
+        chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9223")
         chrome_options.add_experimental_option('prefs', {
-            "download.default_directory": str(Path.home() / "Downloads"),
+            "download.default_directory": str(PASTA_DOWNLOADS),
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
             "plugins.always_open_pdf_externally": True,
             "safebrowsing.enabled": True
         })
-        
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+
         driver = webdriver.Chrome(options=chrome_options)
-        
+
         try:
             driver.execute_cdp_cmd("Page.setDownloadBehavior", {
                 "behavior": "allow",
-                "downloadPath": str(Path.home() / "Downloads")
+                "downloadPath": str(PASTA_DOWNLOADS)
             })
-            logger.info("[OK] Download automatico configurado")
         except Exception:
             pass
-        
-        logger.info("[OK] Conectado com sucesso!")
+
+        logger.info("Chrome conectado")
         return driver
     except Exception as e:
-        logger.error(f"[X] Erro ao conectar: {e}")
-        logger.info("[i] Execute: chrome.exe --remote-debugging-port=9222")
+        logger.error(f"Falha ao conectar: {e}")
+        logger.error("Execute: chrome.exe --remote-debugging-port=9223")
         raise
 
 
-# ========================== NAVEGAÇÃO ==========================
-
 def acessar_senha_web(driver):
-    """Acessa Serviços > Senha Web."""
-    logger.info("\n[>>] ETAPA 1: Acessando 'Servicos' > 'Senha Web'...")
-    
+    logger.info("Acessando Senha Web...")
     if len(driver.window_handles) == 0:
         raise AutomacaoError("Chrome nao tem janelas abertas")
-    
+
     driver.switch_to.window(driver.window_handles[0])
-    
-    url = "https://wwws.bradescosaude.com.br/PCBS-GerenciadorPortal/novaHomeSaudeReferenciado.do"
-    driver.get(url)
-    
+    driver.get("https://wwws.bradescosaude.com.br/PCBS-GerenciadorPortal/novaHomeSaudeReferenciado.do")
+
     WebDriverWait(driver, TIMEOUT_LONGO).until(
         lambda d: d.execute_script("return document.readyState") == "complete"
     )
-    logger.info("[OK] Pagina carregada")
-    time.sleep(2)
-    
     aguardar_e_clicar(driver, By.CSS_SELECTOR, "button.button_novo_menu.cortina-1")
-    logger.info("[OK] Menu 'Servicos' aberto")
-    
     aguardar_e_clicar(driver, By.XPATH, "//div[@class='linha_novo_menu' and contains(text(), 'Senha Web')]")
-    logger.info("[OK] 'Senha Web' clicado")
+    logger.info("Senha Web acessada")
 
 
 def selecionar_codigo_e_continuar(driver, codigo):
-    """Seleciona código e continua."""
-    logger.info(f"\n[>>] ETAPA 2: Selecionando codigo {codigo}...")
-    
+    logger.info(f"Selecionando codigo {codigo}...")
+
     WebDriverWait(driver, TIMEOUT_MEDIO).until(lambda d: len(d.window_handles) > 1)
     driver.switch_to.window(driver.window_handles[-1])
-    
+    WebDriverWait(driver, TIMEOUT_MEDIO).until(
+        lambda d: d.execute_script("return document.readyState") == "complete"
+    )
+
+    try:
+        driver.execute_script("""
+            try {
+                if (typeof toggleStilos === 'function') toggleStilos(false);
+                $('#blocoFormularioOriginal').show();
+                $('#modernizacaoContainer, #modernizacaoIframe').hide();
+            } catch(e) {}
+        """)
+    except:
+        pass
+
     select_element = WebDriverWait(driver, TIMEOUT_MEDIO).until(
         EC.presence_of_element_located((By.ID, "comboReferenciado"))
     )
-    
-    Select(select_element).select_by_value(codigo)
-    logger.info(f"[OK] Codigo {codigo} selecionado")
-    
+
+    if not select_element.is_displayed():
+        driver.execute_script("""
+            var s = document.getElementById('comboReferenciado');
+            if(s){s.style.display='block';s.style.visibility='visible';s.disabled=false;}
+        """)
+
+    # JS puro
+    sucesso = driver.execute_script(f"""
+        var s = document.getElementById('comboReferenciado');
+        s.removeAttribute('readonly'); s.removeAttribute('disabled');
+        s.value = '{codigo}';
+        ['change','input','blur'].forEach(function(t){{
+            s.dispatchEvent(new Event(t, {{bubbles:true, cancelable:true}}));
+        }});
+        return s.value === '{codigo}';
+    """)
+
+    # Fallback jQuery
+    if not sucesso:
+        try:
+            sucesso = driver.execute_script(f"""
+                $('#comboReferenciado').val('{codigo}').trigger('change').trigger('blur');
+                return $('#comboReferenciado').val() === '{codigo}';
+            """)
+        except:
+            pass
+
+    # Fallback Selenium
+    if not sucesso:
+        try:
+            Select(select_element).select_by_value(codigo)
+            sucesso = True
+        except:
+            pass
+
+    if not sucesso:
+        raise AutomacaoError(f"Impossivel selecionar codigo {codigo}")
+
+    logger.info(f"Codigo {codigo} selecionado")
     aguardar_e_clicar(driver, By.XPATH, "//button[contains(., 'Continuar')]")
-    logger.info("[OK] Botao 'Continuar' clicado")
-    time.sleep(2)
+
+    WebDriverWait(driver, TIMEOUT_MEDIO).until(
+        lambda d: d.execute_script("return document.readyState") == "complete"
+    )
 
 
 def nova_consulta(driver, data_inicial, data_final):
-    """Etapa 3: Clica em 'Nova Consulta' e faz a busca das guias."""
-    logger.info(f"\n[>>] ETAPA 3: Realizando nova consulta ({data_inicial} ate {data_final})...")
-    
-    # Aguarda estar na aba correta
-    WebDriverWait(driver, TIMEOUT_MEDIO).until(lambda d: len(d.window_handles) >= 1)
+    logger.info(f"Consultando {data_inicial} a {data_final}...")
+
     driver.switch_to.window(driver.window_handles[-1])
-    
+
+    nova_btn = WebDriverWait(driver, TIMEOUT_MEDIO).until(
+        EC.element_to_be_clickable((By.XPATH, "//img[@alt='Nova Consulta' or @title='Nova Consulta']"))
+    )
+    driver.execute_script("arguments[0].click();", nova_btn)
+
+    # Preenche datas via JS (campos podem estar ocultos pela modernização)
+    WebDriverWait(driver, TIMEOUT_MEDIO).until(
+        EC.presence_of_element_located((By.ID, "periodoDe"))
+    )
+    driver.execute_script(f"""
+        var de = document.getElementById('periodoDe');
+        var ate = document.getElementById('periodoAte');
+        [de, ate].forEach(function(el) {{
+            el.removeAttribute('readonly');
+            el.removeAttribute('disabled');
+            el.style.display = 'block';
+            el.style.visibility = 'visible';
+        }});
+        de.value = '{data_inicial}';
+        ate.value = '{data_final}';
+        ['change','input','blur'].forEach(function(t) {{
+            de.dispatchEvent(new Event(t, {{bubbles:true}}));
+            ate.dispatchEvent(new Event(t, {{bubbles:true}}));
+        }});
+    """)
+
+    consultar_btn = WebDriverWait(driver, TIMEOUT_MEDIO).until(
+        EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Consultar')]"))
+    )
+    driver.execute_script("arguments[0].click();", consultar_btn)
+
     try:
-        # Aguarda e clica em "Nova Consulta"
-        nova_consulta_btn = WebDriverWait(driver, TIMEOUT_MEDIO).until(
-            EC.element_to_be_clickable((By.XPATH, "//img[@alt='Nova Consulta' or @title='Nova Consulta']"))
+        loading = driver.find_elements(By.XPATH,
+            "//*[contains(@class,'loading') or contains(@class,'spinner') or contains(@class,'loader')]")
+        if loading:
+            WebDriverWait(driver, TIMEOUT_MEDIO).until(EC.invisibility_of_element(loading[0]))
+    except:
+        pass
+
+    try:
+        WebDriverWait(driver, TIMEOUT_MEDIO).until(
+            EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
         )
-        driver.execute_script("arguments[0].click();", nova_consulta_btn)
-        logger.info("[OK] 'Nova Consulta' clicado")
-        time.sleep(1)
-        
-        # Aguarda campos de data estarem disponíveis
-        campo_data_inicio = WebDriverWait(driver, TIMEOUT_MEDIO).until(
-            EC.presence_of_element_located((By.ID, "periodoDe"))
-        )
-        campo_data_inicio.clear()
-        campo_data_inicio.send_keys(data_inicial)
-        logger.info(f"[OK] Data inicial: {data_inicial}")
-        
-        campo_data_fim = WebDriverWait(driver, TIMEOUT_MEDIO).until(
-            EC.presence_of_element_located((By.ID, "periodoAte"))
-        )
-        campo_data_fim.clear()
-        campo_data_fim.send_keys(data_final)
-        logger.info(f"[OK] Data final: {data_final}")
-        
-        # Aguarda e clica em "Consultar"
-        consultar_btn = WebDriverWait(driver, TIMEOUT_MEDIO).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Consultar')]"))
-        )
-        driver.execute_script("arguments[0].click();", consultar_btn)
-        logger.info("[OK] Botao 'Consultar' clicado")
-        
-        # Aguarda o carregamento
-        logger.info("[.] Aguardando resultados carregarem...")
-        time.sleep(3)  # Delay inicial para a página começar a processar
-        
-        # Verifica se há algum indicador de carregamento e aguarda ele desaparecer
-        try:
-            loading_elements = driver.find_elements(By.XPATH, "//*[contains(@class, 'loading') or contains(@class, 'spinner') or contains(@class, 'loader')]")
-            if loading_elements:
-                logger.info("   [.] Detectado indicador de carregamento, aguardando...")
+    except TimeoutException:
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        if iframes:
+            driver.switch_to.frame(iframes[0])
+            try:
                 WebDriverWait(driver, TIMEOUT_MEDIO).until(
-                    EC.invisibility_of_element(loading_elements[0])
+                    EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
                 )
-        except:
-            pass
-        
-        # Aguarda a tabela de resultados carregar
-        try:
-            WebDriverWait(driver, TIMEOUT_MEDIO).until(
-                EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
-            )
-            logger.info("[OK] Resultados carregados")
-        except TimeoutException:
-            logger.warning("[!] Tabela nao encontrada, verificando iframe...")
-            # Verifica se há um iframe
-            iframes = driver.find_elements(By.TAG_NAME, "iframe")
-            if iframes:
-                logger.info(f"   [i] Encontrado(s) {len(iframes)} iframe(s), tentando mudar para o primeiro...")
-                driver.switch_to.frame(iframes[0])
-                try:
-                    WebDriverWait(driver, TIMEOUT_MEDIO).until(
-                        EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
-                    )
-                    logger.info("[OK] Resultados encontrados dentro do iframe")
-                except TimeoutException:
-                    driver.switch_to.default_content()
-                    logger.error("[X] Tabela nao encontrada nem no iframe")
-                    logger.info(f"URL atual: {driver.current_url}")
-                    raise
-            else:
-                logger.error("[X] Nenhum iframe encontrado e tabela nao carregou")
-                logger.info(f"URL atual: {driver.current_url}")
+            except TimeoutException:
+                driver.switch_to.default_content()
                 raise
-        
-    except (TimeoutException, NoSuchElementException) as e:
-        logger.error(f"[X] Erro na consulta: {e}")
-        raise
+        else:
+            raise
+
+    logger.info("Resultados carregados")
 
 
 # ========================== PROCESSAMENTO ==========================
 
 def processar_guia(driver, linha, indice, total, aba_trabalho):
-    """Processa uma única guia."""
     try:
         colunas = linha.find_elements(By.TAG_NAME, "td")
-        
-        # DEBUG: Mostra conteúdo das colunas
-        logger.info(f"\n[DEBUG] Linha {indice + 1} - Conteudo das colunas:")
-        for idx, col in enumerate(colunas[:8]):
-            try:
-                texto = col.text.strip()[:50]
-                logger.info(f"   Coluna {idx}: '{texto}'")
-            except:
-                logger.info(f"   Coluna {idx}: [erro]")
-        
-        # VERIFICA SE A LINHA ESTÁ VAZIA (todas as colunas vazias)
-        todas_vazias = True
-        for col in colunas[:8]:
-            try:
-                if col.text.strip():
-                    todas_vazias = False
-                    break
-            except:
-                pass
-        
-        if todas_vazias:
-            logger.warning(f"\n[{indice + 1}/{total}] *** PULANDO (LINHA VAZIA) ***")
-            return True  # Não conta como erro
-        
-        # Extrai nome (coluna 4)
-        nome_beneficiario = "DESCONHECIDO"
-        try:
-            nome_beneficiario = colunas[4].text.strip()
-            logger.info(f"   [DEBUG] Nome coluna 4: '{nome_beneficiario}'")
-            
-            if not nome_beneficiario or len(nome_beneficiario) < 3:
-                logger.warning(f"   [!] Nome invalido, tentando outras colunas...")
-                for idx in [3, 5, 6, 7]:
-                    try:
-                        nome_temp = colunas[idx].text.strip()
-                        if nome_temp and len(nome_temp) > 3:
-                            nome_beneficiario = nome_temp
-                            logger.info(f"   [OK] Nome na coluna {idx}: {nome_beneficiario}")
-                            break
-                    except:
-                        continue
-        except Exception as e:
-            logger.warning(f"   [!] Erro ao extrair nome: {e}")
-        
-        if not nome_beneficiario or len(nome_beneficiario) < 3:
-            logger.warning(f"\n[{indice + 1}/{total}] *** PULANDO (SEM NOME VALIDO) ***")
-            return True  # Não conta como erro
-        
-        # ID único
-        try:
-            col1 = colunas[1].text.strip() if len(colunas) > 1 else ""
-            col2 = colunas[2].text.strip() if len(colunas) > 2 else ""
-            col3 = colunas[3].text.strip() if len(colunas) > 3 else ""
-            col4 = colunas[4].text.strip() if len(colunas) > 4 else ""
-            id_unico = f"{col1}_{col2}_{col3}_{col4}_{indice}"
-            logger.info(f"   [DEBUG] ID unico: {id_unico[:80]}...")
-        except:
-            id_unico = f"{indice}_{nome_beneficiario}"
-        
-        # Verifica duplicação
-        if id_unico in guias_processadas:
-            logger.warning(f"\n[{indice + 1}/{total}] *** PULANDO (JA PROCESSADA) ***")
-            return True
-        
-        guias_processadas.add(id_unico)
-        logger.info(f"   [DEBUG] Total processadas: {len(guias_processadas)}")
-        
+
+        # Extrai nome PRIMEIRO para sempre logar
+        nome_beneficiario = _extrair_nome(colunas, linha)
         nome_arquivo = limpar_nome_arquivo(nome_beneficiario)
-        logger.info(f"\n{'='*60}")
-        logger.info(f"[{indice + 1}/{total}] PROCESSANDO: {nome_beneficiario}")
-        logger.info(f"   Arquivo: {nome_arquivo}")
-        logger.info(f"{'='*60}")
-        
-        verificar_e_fechar_modal_erro(driver)
-        
-        # Seleciona linha
+
+        # --- LINHA 1: Início do processamento (sempre aparece) ---
+        logger.info(f"[{indice+1}/{total}] {nome_beneficiario}")
+
+        if not nome_beneficiario or nome_beneficiario == "DESCONHECIDO" or len(nome_beneficiario) < 3:
+            logger.info(f"  PULADA (sem nome valido)")
+            return True
+
+        # ID único
+        id_final, _ = gerar_id_unico_robusto(colunas, nome_beneficiario, indice)
+        if id_final in guias_processadas:
+            logger.info(f"  PULADA (ja processada)")
+            return True
+        guias_processadas.add(id_final)
+
+        verificar_saude_pagina(driver, aba_trabalho)
+
+        # Seleciona radio
         try:
             radio = colunas[0].find_element(By.CSS_SELECTOR, "input[type='radio'][name='codigoSolicitacao']")
         except:
             radio = linha.find_element(By.TAG_NAME, "input")
-        
-        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", radio)
-        time.sleep(0.3)
-        driver.execute_script("arguments[0].click();", radio)
-        logger.info("   [OK] Linha selecionada")
-        time.sleep(0.5)
-        
-        verificar_e_fechar_modal_erro(driver)
-        verificar_e_tratar_erro_interno(driver, aba_trabalho)
-        
-        # Clica Informações do Beneficiário
+
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();", radio
+        )
+        time.sleep(SLEEP_CURTO)
+
+        # Info Beneficiário
         aguardar_e_clicar(driver, By.CSS_SELECTOR, "img.btn_info_contrato[alt='Informações do Beneficiário']")
-        logger.info("   [i] 'Informacoes do Beneficiario' clicado")
-        time.sleep(0.5)
-        
-        verificar_e_fechar_modal_erro(driver)
-        verificar_e_tratar_erro_interno(driver, aba_trabalho)
-        
-        # Clica PDF (download INSTANTÂNEO)
-        aguardar_e_clicar(driver, By.XPATH, "//button[contains(@onclick, 'carregarPDFtiss')]")
-        logger.info("   [i] Botao 'PDF' clicado - download INSTANTANEO")
-        
-        # Verifica erro antes de tentar download
-        if verificar_e_tratar_erro_interno(driver, aba_trabalho):
-            logger.warning("   [!] Erro interno apos clicar PDF, tentando novamente...")
-            # Aguarda e tenta novamente
-            time.sleep(2)
+        time.sleep(SLEEP_CURTO)
+
+        if verificar_saude_pagina(driver, aba_trabalho):
+            # Erro após clicar Info Beneficiário - precisa recomeçar esta guia
+            logger.warning(f"  Erro apos Info Beneficiario, retentando guia...")
+            time.sleep(SLEEP_LONGO)
+            # Re-seleciona radio e tenta novamente
+            try:
+                driver.switch_to.window(aba_trabalho)
+                WebDriverWait(driver, TIMEOUT_CURTO).until(
+                    EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
+                )
+                # Re-busca a linha e radio
+                guias_retry = driver.find_elements(By.XPATH,
+                    "//tr[(@class='even' or @class='odd') and td[contains(., 'Liberada')]]")
+                if indice < len(guias_retry):
+                    linha_retry = guias_retry[indice]
+                    colunas_retry = linha_retry.find_elements(By.TAG_NAME, "td")
+                    try:
+                        radio_retry = colunas_retry[0].find_element(By.CSS_SELECTOR, "input[type='radio'][name='codigoSolicitacao']")
+                    except:
+                        radio_retry = linha_retry.find_element(By.TAG_NAME, "input")
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();", radio_retry
+                    )
+                    time.sleep(SLEEP_CURTO)
+                    aguardar_e_clicar(driver, By.CSS_SELECTOR, "img.btn_info_contrato[alt='Informações do Beneficiário']")
+                    time.sleep(SLEEP_CURTO)
+                    if verificar_saude_pagina(driver, aba_trabalho):
+                        logger.error(f"  Erro persistente, pulando guia")
+                        return False
+                else:
+                    logger.error(f"  Linha nao encontrada no retry")
+                    return False
+            except Exception as e:
+                logger.error(f"  Falha no retry: {e}")
+                return False
+
+        # PDF
+        try:
             aguardar_e_clicar(driver, By.XPATH, "//button[contains(@onclick, 'carregarPDFtiss')]")
-            logger.info("   [i] Tentativa 2: Botao 'PDF' clicado")
-        
-        # Renomeia IMEDIATAMENTE
-        sucesso = renomear_guia_sadt_imediato(nome_arquivo)
-        
-        if not sucesso:
-            logger.warning(f"   [X] Falha ao baixar PDF")
+        except ElementoNaoEncontradoError:
+            logger.error(f"  Botao PDF nao encontrado, pulando guia")
+            return False
+
+        if verificar_saude_pagina(driver, aba_trabalho):
+            logger.warning(f"  Erro apos PDF, retentando...")
+            time.sleep(SLEEP_LONGO)
+            try:
+                aguardar_e_clicar(driver, By.XPATH, "//button[contains(@onclick, 'carregarPDFtiss')]")
+            except ElementoNaoEncontradoError:
+                logger.error(f"  Botao PDF nao encontrado no retry")
+                return False
+
+        # Renomeia
+        sucesso, nome_final, tamanho_kb, numero_guia = renomear_guia_sadt_imediato(nome_arquivo)
+
+        # --- LINHA 2: Resultado do download ---
+        if sucesso:
+            logger.info(f"  OK: {nome_final} ({tamanho_kb:.1f} KB) - guia #{numero_guia}")
         else:
-            logger.info(f"   [***] Guia salva com sucesso!")
-        
-        # Fecha about:blank
-        time.sleep(0.5)
+            logger.error(f"  FALHA no download do PDF")
+
+        # Limpa e volta
         fechar_aba_about_blank(driver, aba_trabalho)
-        
         driver.switch_to.window(aba_trabalho)
-        verificar_e_fechar_modal_erro(driver)
-        verificar_e_tratar_erro_interno(driver, aba_trabalho)
-        
-        # Volta à tabela
+
         try:
             aguardar_e_clicar(driver, By.XPATH, "//button[contains(@onclick, 'fnVoltar')]", timeout=TIMEOUT_CURTO)
-            logger.info("   [<-] Voltou a tabela")
-            time.sleep(1)
-            
-            verificar_e_fechar_modal_erro(driver)
-            verificar_e_tratar_erro_interno(driver, aba_trabalho)
-            
             WebDriverWait(driver, TIMEOUT_CURTO).until(
                 EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
             )
-        except Exception as e:
-            logger.warning(f"   [!] Erro ao voltar: {e}")
-            verificar_e_fechar_modal_erro(driver)
-            verificar_e_tratar_erro_interno(driver, aba_trabalho)
-        
-        time.sleep(0.5)
+        except Exception:
+            verificar_saude_pagina(driver, aba_trabalho)
+
+        time.sleep(SLEEP_CURTO)
         return True
-        
+
     except Exception as e:
-        logger.error(f"   [X] Erro: {type(e).__name__}: {str(e)}")
+        # --- LINHA 3 (só em caso de erro): Detalhes do erro ---
+        logger.error(f"  ERRO: {type(e).__name__}: {e}")
         try:
-            verificar_e_fechar_modal_erro(driver)
+            verificar_saude_pagina(driver, aba_trabalho)
             fechar_aba_about_blank(driver, aba_trabalho)
         except:
             pass
@@ -636,205 +568,132 @@ def processar_guia(driver, linha, indice, total, aba_trabalho):
 
 
 def verificar_e_recarregar_tabela(driver, total_esperado, data_inicial, data_final, aba_trabalho):
-    """
-    Verifica se o número de guias na tabela corresponde ao esperado.
-    Se não corresponder, executa nova consulta.
-    
-    Returns: bool - True se tabela está OK ou foi recarregada com sucesso
-    """
     try:
         driver.switch_to.window(aba_trabalho)
-        
-        # Conta guias atuais
-        guias_atuais = driver.find_elements(
-            By.XPATH,
-            "//tr[(@class='even' or @class='odd') and td[contains(., 'Liberada')]]"
-        )
-        total_atual = len(guias_atuais)
-        
-        logger.info(f"[i] Verificacao: {total_atual}/{total_esperado} guias na tabela")
-        
-        # Se o número de guias mudou, recarrega
-        if total_atual != total_esperado:
-            logger.warning(f"[!] ALERTA: Numero de guias mudou! Esperado: {total_esperado}, Atual: {total_atual}")
-            logger.info("[>>] Recarregando tabela com Nova Consulta...")
-            
-            # Executa nova consulta
+        guias = driver.find_elements(By.XPATH,
+            "//tr[(@class='even' or @class='odd') and td[contains(., 'Liberada')]]")
+
+        if len(guias) != total_esperado:
+            logger.warning(f"Tabela inconsistente ({len(guias)} vs {total_esperado}), recarregando...")
             nova_consulta(driver, data_inicial, data_final)
-            time.sleep(2)
-            
-            # Verifica se recarregou corretamente
-            guias_recarregadas = driver.find_elements(
-                By.XPATH,
-                "//tr[(@class='even' or @class='odd') and td[contains(., 'Liberada')]]"
-            )
-            total_recarregado = len(guias_recarregadas)
-            
-            if total_recarregado == total_esperado:
-                logger.info(f"[OK] Tabela recarregada com sucesso! {total_recarregado} guias")
-                return True
-            else:
-                logger.warning(f"[!] Apos recarregar: {total_recarregado} guias (esperado: {total_esperado})")
-                # Aceita a nova quantidade como válida
-                return True
-        
+            time.sleep(SLEEP_LONGO)
+            return True
         return True
-        
     except Exception as e:
-        logger.error(f"[X] Erro ao verificar tabela: {e}")
+        logger.error(f"Erro ao verificar tabela: {e}")
         return False
 
 
 def processar_guias_liberadas(driver, codigo, data_inicial, data_final):
-    """Processa guias com status 'Liberada'."""
-    logger.info("\n[>>] ETAPA 4: Processando guias 'Liberada'...")
-    
     global guias_por_paciente, guias_processadas
     guias_por_paciente = {}
     guias_processadas = set()
-    
+
     aba_trabalho = driver.window_handles[-1]
     driver.switch_to.window(aba_trabalho)
-    
-    verificar_e_fechar_modal_erro(driver)
-    
-    # Busca guias
+
     try:
         WebDriverWait(driver, TIMEOUT_CURTO).until(
             EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
         )
     except TimeoutException:
-        logger.error("[X] Tabela nao encontrada")
+        logger.error("Tabela nao encontrada")
         return
-    
-    guias = driver.find_elements(
-        By.XPATH,
-        "//tr[(@class='even' or @class='odd') and td[contains(., 'Liberada')]]"
-    )
+
+    guias = driver.find_elements(By.XPATH,
+        "//tr[(@class='even' or @class='odd') and td[contains(., 'Liberada')]]")
     total_inicial = len(guias)
-    
+
     if total_inicial == 0:
-        logger.warning("[!] Nenhuma guia 'Liberada' encontrada")
+        logger.warning("Nenhuma guia 'Liberada' encontrada")
         return
-    
-    logger.info(f"[i] {total_inicial} guia(s) 'Liberada' encontrada(s)")
-    
+
+    logger.info(f"{total_inicial} guia(s) 'Liberada' encontrada(s)")
+
     sucessos = 0
+    falhas = 0
     tentativas_recarregar = 0
-    max_tentativas_recarregar = 3
-    
     i = 0
+
     while i < total_inicial:
         driver.switch_to.window(aba_trabalho)
-        verificar_e_fechar_modal_erro(driver)
-        
-        # VERIFICAÇÃO: Antes de processar cada guia, verifica se a tabela está completa
+
         try:
-            guias_atualizadas = driver.find_elements(
-                By.XPATH,
-                "//tr[(@class='even' or @class='odd') and td[contains(., 'Liberada')]]"
-            )
+            guias_atualizadas = driver.find_elements(By.XPATH,
+                "//tr[(@class='even' or @class='odd') and td[contains(., 'Liberada')]]")
             total_atual = len(guias_atualizadas)
-            
-            # Se o número de guias mudou, recarrega a tabela
+
             if total_atual != total_inicial:
-                logger.warning(f"\n[!] INCONSISTENCIA DETECTADA!")
-                logger.warning(f"    Esperado: {total_inicial} guias | Encontrado: {total_atual} guias")
-                
-                if tentativas_recarregar < max_tentativas_recarregar:
+                if tentativas_recarregar < 3:
                     tentativas_recarregar += 1
-                    logger.info(f"[>>] Tentativa {tentativas_recarregar}/{max_tentativas_recarregar}: Recarregando tabela...")
-                    
                     if verificar_e_recarregar_tabela(driver, total_inicial, data_inicial, data_final, aba_trabalho):
-                        logger.info("[OK] Tabela recarregada! Continuando do indice atual...")
-                        tentativas_recarregar = 0  # Reset contador
-                        continue  # Tenta novamente sem incrementar i
-                    else:
-                        logger.error("[X] Falha ao recarregar tabela")
-                        i += 1
+                        tentativas_recarregar = 0
                         continue
-                else:
-                    logger.error(f"[X] Limite de tentativas atingido. Pulando guia {i+1}")
-                    tentativas_recarregar = 0
-                    i += 1
-                    continue
-            
-            # Verifica se o índice ainda é válido
+                i += 1
+                continue
+
             if i >= len(guias_atualizadas):
-                logger.warning(f"   [!] Guia {i+1} nao encontrada no indice")
                 i += 1
                 continue
-            
-            linha = guias_atualizadas[i]
-            
-            if processar_guia(driver, linha, i, total_inicial, aba_trabalho):
+
+            if processar_guia(driver, guias_atualizadas[i], i, total_inicial, aba_trabalho):
                 sucessos += 1
-            
-            time.sleep(1)
-            i += 1  # Só incrementa se processar com sucesso
-                
-        except StaleElementReferenceException:
-            logger.warning(f"   [!] Guia {i+1} stale, recarregando tabela...")
-            if verificar_e_recarregar_tabela(driver, total_inicial, data_inicial, data_final, aba_trabalho):
-                continue  # Tenta novamente sem incrementar i
             else:
-                i += 1
-                continue
-        except Exception as e:
-            logger.error(f"   [X] Erro na guia {i+1}: {e}")
+                falhas += 1
+
+            time.sleep(SLEEP_CURTO)
             i += 1
-            continue
-    
-    logger.info(f"\n[***] Concluido! {sucessos}/{total_inicial} baixadas")
-    logger.info(f"[i] Guias unicas processadas: {len(guias_processadas)}")
+
+        except StaleElementReferenceException:
+            logger.warning(f"Stale na guia {i+1}, recarregando tabela...")
+            if verificar_e_recarregar_tabela(driver, total_inicial, data_inicial, data_final, aba_trabalho):
+                continue
+            i += 1
+        except Exception as e:
+            logger.error(f"Erro guia {i+1}: {e}")
+            falhas += 1
+            i += 1
+
+    # Resumo final
+    logger.info("=" * 50)
+    logger.info(f"RESULTADO: {sucessos} OK | {falhas} falhas | {total_inicial} total")
+    logger.info("=" * 50)
+
 
 # ========================== MAIN ==========================
 
 def main():
-    """Função principal."""
-    print("=" * 60)
+    print("=" * 50)
     print("AUTOMACAO BRADESCO SAUDE - DOWNLOAD DE GUIAS")
-    print("=" * 60)
-    
-    # Solicita as datas ao usuário
-    print("\n[#] Informe o periodo para consulta:")
-    data_inicial = input("Data inicial (DD/MM/AAAA): ").strip()
-    data_final = input("Data final (DD/MM/AAAA): ").strip()
-    
-    # Validação de formato
-    if not validar_formato_data(data_inicial) or not validar_formato_data(data_final):
+    print("=" * 50)
+
+    if not validar_formato_data(DATA_INICIAL) or not validar_formato_data(DATA_FINAL):
         print("[X] Formato de data invalido! Use DD/MM/AAAA")
         input("\nENTER para finalizar...")
         return
-    
-    logger.info(f"Periodo selecionado: {data_inicial} ate {data_final}")
-    
+
+    logger.info(f"Periodo: {DATA_INICIAL} a {DATA_FINAL}")
+
     driver = None
     try:
         driver = conectar_chrome_existente()
         acessar_senha_web(driver)
-        
+
         for codigo in CODIGOS:
-            logger.info(f"\n{'=' * 60}")
-            logger.info(f"[#] Codigo: {codigo}")
-            logger.info(f"{'=' * 60}")
-            
+            logger.info(f"Codigo: {codigo}")
             selecionar_codigo_e_continuar(driver, codigo)
-            nova_consulta(driver, data_inicial, data_final)
-            processar_guias_liberadas(driver, codigo, data_inicial, data_final)
-        
-        print("\n" + "=" * 60)
-        print("CONCLUIDO!")
-        print(f"Arquivos salvos em: {PASTA_DOWNLOADS}")
-        print("=" * 60)
-        
+            nova_consulta(driver, DATA_INICIAL, DATA_FINAL)
+            processar_guias_liberadas(driver, codigo, DATA_INICIAL, DATA_FINAL)
+
+        print(f"\nConcluido! Arquivos em: {PASTA_DOWNLOADS}")
+
     except KeyboardInterrupt:
-        logger.warning("\n[!] Interrompido pelo usuario")
+        logger.warning("Interrompido pelo usuario")
     except Exception as e:
-        logger.error(f"\n[X] ERRO: {e}")
+        logger.error(f"ERRO FATAL: {e}")
         import traceback
         traceback.print_exc()
-    
+
     input("\nENTER para finalizar...")
 
 if __name__ == "__main__":
