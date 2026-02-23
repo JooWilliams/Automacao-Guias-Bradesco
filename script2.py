@@ -22,8 +22,8 @@ CODIGOS = ["0000994402"]
 #CODIGOS = ["0000938246"]
 
 # Datas de busca (formato: DD/MM/AAAA)
-DATA_INICIAL = "05/02/2026"
-DATA_FINAL = "05/02/2026"
+DATA_INICIAL = "19/02/2026"
+DATA_FINAL = "19/02/2026"
 
 # Timeouts configuráveis
 TIMEOUT_CURTO = 10
