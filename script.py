@@ -256,7 +256,6 @@ def renomear_guia_sadt_imediato(nome_base, max_tentativas=30):
 # ========================== CHROME ==========================
 
 def conectar_chrome_existente():
-    logger.info("Conectando ao Chrome...")
     try:
         chrome_options = Options()
         chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9223")
@@ -289,7 +288,6 @@ def conectar_chrome_existente():
 
 
 def acessar_senha_web(driver):
-    logger.info("Acessando Senha Web...")
     if len(driver.window_handles) == 0:
         raise AutomacaoError("Chrome nao tem janelas abertas")
 
@@ -305,7 +303,6 @@ def acessar_senha_web(driver):
 
 
 def selecionar_codigo_e_continuar(driver, codigo):
-    logger.info(f"Selecionando codigo {codigo}...")
 
     WebDriverWait(driver, TIMEOUT_MEDIO).until(lambda d: len(d.window_handles) > 1)
     driver.switch_to.window(driver.window_handles[-1])
@@ -524,7 +521,7 @@ def processar_guia(driver, linha, indice, total, aba_trabalho):
             return False
 
         if verificar_saude_pagina(driver, aba_trabalho):
-            logger.warning(f"  Erro apos PDF, retentando...")
+            logger.warning(f"  Erro apos PDF, repetindo...")
             time.sleep(SLEEP_LONGO)
             try:
                 aguardar_e_clicar(driver, By.XPATH, "//button[contains(@onclick, 'carregarPDFtiss')]")
