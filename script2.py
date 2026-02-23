@@ -28,7 +28,7 @@ DATA_FINAL = "19/02/2026"
 # Timeouts configuráveis
 TIMEOUT_CURTO = 10
 TIMEOUT_MEDIO = 20
-TIMEOUT_LONGO = 30
+TIMEOUT_LONGO = 40
 
 # Controle de guias processadas
 guias_por_paciente = {}
@@ -398,12 +398,12 @@ def conectar_chrome_existente():
         
     except Exception as e:
         logger.error(f"[X] Erro ao conectar: {e}")
-        logger.info("[i] Execute: chrome.exe --remote-debugging-port=9222")
+        logger.info("[i] Execute: chrome.exe --remote-debugging-port=9223")
         raise
     
 def acessar_senha_web(driver):
     """Acessa Serviços > Senha Web."""
-    logger.info("\n[>>] ETAPA 1: Acessando 'Servicos' > 'Senha Web'...")
+    logger.info("\n >> Acessando Senha Web")
     
     if len(driver.window_handles) == 0:
         raise AutomacaoError("Chrome nao tem janelas abertas")
@@ -420,15 +420,13 @@ def acessar_senha_web(driver):
     time.sleep(2)
     
     aguardar_e_clicar(driver, By.CSS_SELECTOR, "button.button_novo_menu.cortina-1")
-    logger.info("[OK] Menu 'Servicos' aberto")
     
     aguardar_e_clicar(driver, By.XPATH, "//div[@class='linha_novo_menu' and contains(text(), 'Senha Web')]")
-    logger.info("[OK] 'Senha Web' clicado")
 
 
 def selecionar_codigo_e_continuar(driver, codigo):
     """Seleciona código e continua - VERSÃO ULTRA ROBUSTA."""
-    logger.info(f"\n[>>] ETAPA 2: Selecionando codigo {codigo}...")
+    logger.info(f"\n>> Selecionando codigo {codigo}...")
     
     # Aguarda nova aba abrir
     WebDriverWait(driver, TIMEOUT_MEDIO).until(lambda d: len(d.window_handles) > 1)
@@ -500,7 +498,7 @@ def selecionar_codigo_e_continuar(driver, codigo):
     time.sleep(0.5)
     
     # === MÉTODO 1: JavaScript Puro (Mais Confiável) ===
-    logger.info(f"   [.] METODO 1: Selecionando via JavaScript puro...")
+    logger.info(f"   [.] METODO 1: Selecionando via JavaScript")
     sucesso_js = False
     try:
         # Remove readonly/disabled se existir
@@ -527,7 +525,7 @@ def selecionar_codigo_e_continuar(driver, codigo):
         # Verifica se selecionou
         valor_selecionado = driver.execute_script("return document.getElementById('comboReferenciado').value;")
         if valor_selecionado == codigo:
-            logger.info(f"   [OK] METODO 1 funcionou! Codigo {codigo} selecionado")
+            logger.info(f"   [OK] Codigo {codigo} selecionado")
             sucesso_js = True
         else:
             logger.warning(f"   [!] METODO 1 falhou. Valor: '{valor_selecionado}' != '{codigo}'")
@@ -562,7 +560,7 @@ def selecionar_codigo_e_continuar(driver, codigo):
             
             valor_selecionado = select_obj.first_selected_option.get_attribute('value')
             if valor_selecionado == codigo:
-                logger.info(f"   [OK] METODO 3 funcionou! Codigo {codigo} selecionado")
+                logger.info(f"   [OK] METODO 3! Codigo {codigo} selecionado")
                 sucesso_js = True
             else:
                 logger.warning(f"   [!] METODO 3 falhou. Valor: '{valor_selecionado}' != '{codigo}'")
@@ -584,7 +582,7 @@ def selecionar_codigo_e_continuar(driver, codigo):
             
             valor_selecionado = driver.execute_script("return document.getElementById('comboReferenciado').value;")
             if valor_selecionado == codigo:
-                logger.info(f"   [OK] METODO 4 funcionou! Codigo {codigo} selecionado")
+                logger.info(f"   [OK] METODO 4! Codigo {codigo} selecionado")
                 sucesso_js = True
             else:
                 logger.warning(f"   [!] METODO 4 falhou. Valor: '{valor_selecionado}' != '{codigo}'")
