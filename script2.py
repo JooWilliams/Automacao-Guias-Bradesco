@@ -22,8 +22,8 @@ CODIGOS = ["0000994402"]
 #CODIGOS = ["0000938246"]
 
 # Datas de busca (formato: DD/MM/AAAA)
-DATA_INICIAL = "13/03/2026"
-DATA_FINAL = "13/03/2026"
+DATA_INICIAL = "18/03/2026"
+DATA_FINAL = "18/03/2026"
 
 # Timeouts configuráveis
 TIMEOUT_CURTO = 10
@@ -639,15 +639,15 @@ def nova_consulta(driver, data_inicial, data_final):
         campo_data_inicio = WebDriverWait(driver, TIMEOUT_MEDIO).until(
             EC.presence_of_element_located((By.ID, "periodoDe"))
         )
-        campo_data_inicio.clear()
-        campo_data_inicio.send_keys(data_inicial)
+        driver.execute_script("arguments[0].value = '';", campo_data_inicio)
+        driver.execute_script("arguments[0].value = arguments[1];", campo_data_inicio, data_inicial)
         logger.info(f"[OK] Data inicial: {data_inicial}")
-        
+
         campo_data_fim = WebDriverWait(driver, TIMEOUT_MEDIO).until(
             EC.presence_of_element_located((By.ID, "periodoAte"))
         )
-        campo_data_fim.clear()
-        campo_data_fim.send_keys(data_final)
+        driver.execute_script("arguments[0].value = '';", campo_data_fim)
+        driver.execute_script("arguments[0].value = arguments[1];", campo_data_fim, data_final)
         logger.info(f"[OK] Data final: {data_final}")
         
         # Aguarda e clica em "Consultar"
