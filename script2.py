@@ -188,24 +188,34 @@ def verificar_e_fechar_modal_erro(driver):
 
 
 def fechar_aba_about_blank(driver, aba_trabalho):
-    """Fecha abas about:blank abertas pelo Chrome."""
+    """Fecha abas temporarias abertas pelo Chrome (about:blank, PDFs, blob:, etc)."""
     try:
         abas_atuais = driver.window_handles
-        
+        aba_portal = driver.window_handles[0]
+
         for aba in abas_atuais:
-            if aba != aba_trabalho:
-                try:
-                    driver.switch_to.window(aba)
-                    url_atual = driver.current_url
-                    
-                    if url_atual == "about:blank" or url_atual.startswith("about:"):
-                        driver.close()
-                        logger.info("   [i] Aba about:blank fechada")
-                except Exception:
-                    pass
-        
+            if aba == aba_trabalho or aba == aba_portal:
+                continue
+            try:
+                driver.switch_to.window(aba)
+                url_atual = driver.current_url
+
+                eh_aba_temporaria = (
+                    url_atual.startswith("about:") or
+                    url_atual.startswith("blob:") or
+                    url_atual.startswith("data:") or
+                    url_atual.startswith("chrome-extension:") or
+                    url_atual.lower().endswith(".pdf")
+                )
+
+                if eh_aba_temporaria:
+                    driver.close()
+                    logger.info(f"   [i] Aba temporaria fechada: {url_atual[:60]}")
+            except Exception:
+                pass
+
         driver.switch_to.window(aba_trabalho)
-        
+
     except Exception as e:
         logger.warning(f"Erro ao fechar abas: {e}")
 
@@ -383,15 +393,25 @@ def conectar_chrome_existente():
         
         driver = webdriver.Chrome(options=chrome_options)
         
-        # Configura download via CDP
+        # Configura download via CDP (Browser-wide: aplica a todas as abas, inclusive novas)
         try:
-            driver.execute_cdp_cmd("Page.setDownloadBehavior", {
+            driver.execute_cdp_cmd("Browser.setDownloadBehavior", {
                 "behavior": "allow",
-                "downloadPath": str(PASTA_DOWNLOADS)
+                "downloadPath": str(PASTA_DOWNLOADS),
+                "eventsEnabled": True
             })
-            logger.info("[OK] Download automatico configurado")
+            logger.info("[OK] Download automatico configurado (Browser-wide)")
         except Exception as e:
-            logger.warning(f"[!] Aviso CDP: {e}")
+            logger.warning(f"[!] Aviso CDP Browser: {e}")
+            # Fallback para Page-level caso Browser nao seja suportado
+            try:
+                driver.execute_cdp_cmd("Page.setDownloadBehavior", {
+                    "behavior": "allow",
+                    "downloadPath": str(PASTA_DOWNLOADS)
+                })
+                logger.info("[OK] Download configurado via Page (fallback)")
+            except Exception as e2:
+                logger.warning(f"[!] Aviso CDP Page: {e2}")
         
         logger.info("[OK] Conectado com sucesso!")
         return driver
@@ -492,7 +512,26 @@ def selecionar_codigo_e_continuar(driver, codigo):
             time.sleep(2)
     
     if not select_element:
-        raise ElementoNaoEncontradoError("Select 'comboReferenciado' nao encontrado")
+        # Fallback: tenta localizar o select dentro de iframes
+        logger.warning("   [!] Select nao encontrado no contexto principal, verificando iframes...")
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        if iframes:
+            logger.info(f"   [i] Encontrado(s) {len(iframes)} iframe(s), tentando localizar select dentro deles...")
+            for i, iframe in enumerate(iframes):
+                try:
+                    driver.switch_to.frame(iframe)
+                    select_element = WebDriverWait(driver, TIMEOUT_CURTO).until(
+                        EC.presence_of_element_located((By.ID, "comboReferenciado"))
+                    )
+                    logger.info(f"   [OK] Select encontrado dentro do iframe {i}")
+                    break
+                except Exception:
+                    driver.switch_to.default_content()
+            else:
+                driver.switch_to.default_content()
+
+        if not select_element:
+            raise ElementoNaoEncontradoError("Select 'comboReferenciado' nao encontrado")
     
     # Scroll até o elemento
     driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", select_element)
@@ -532,82 +571,6 @@ def selecionar_codigo_e_continuar(driver, codigo):
             logger.warning(f"   [!] METODO 1 falhou. Valor: '{valor_selecionado}' != '{codigo}'")
     except Exception as e:
         logger.warning(f"   [!] METODO 1 exception: {e}")
-    
-    # # === MÉTODO 2: jQuery (Fallback 1) ===
-    # if not sucesso_js:
-    #     logger.info(f"   [.] METODO 2: Tentando via jQuery...")
-    #     try:
-    #         driver.execute_script(f"""
-    #             $('#comboReferenciado').val('{codigo}').trigger('change').trigger('blur');
-    #         """)
-    #         time.sleep(0.5)
-            
-    #         valor_selecionado = driver.execute_script("return $('#comboReferenciado').val();")
-    #         if valor_selecionado == codigo:
-    #             logger.info(f"   [OK] METODO 2 funcionou! Codigo {codigo} selecionado")
-    #             sucesso_js = True
-    #         else:
-    #             logger.warning(f"   [!] METODO 2 falhou. Valor: '{valor_selecionado}' != '{codigo}'")
-    #     except Exception as e:
-    #         logger.warning(f"   [!] METODO 2 exception: {e}")
-    
-    # # === MÉTODO 3: Selenium Select (Fallback 2) ===
-    # if not sucesso_js:
-    #     logger.info(f"   [.] METODO 3: Tentando via Selenium Select...")
-    #     try:
-    #         select_obj = Select(select_element)
-    #         select_obj.select_by_value(codigo)
-    #         time.sleep(0.5)
-            
-    #         valor_selecionado = select_obj.first_selected_option.get_attribute('value')
-    #         if valor_selecionado == codigo:
-    #             logger.info(f"   [OK] METODO 3! Codigo {codigo} selecionado")
-    #             sucesso_js = True
-    #         else:
-    #             logger.warning(f"   [!] METODO 3 falhou. Valor: '{valor_selecionado}' != '{codigo}'")
-    #     except Exception as e:
-    #         logger.warning(f"   [!] METODO 3 exception: {e}")
-    
-    # # === MÉTODO 4: Click na option específica (Fallback 3) ===
-    # if not sucesso_js:
-    #     logger.info(f"   [.] METODO 4: Tentando clicar na option diretamente...")
-    #     try:
-    #         option_element = driver.find_element(By.XPATH, f"//option[@value='{codigo}']")
-    #         driver.execute_script("arguments[0].selected = true;", option_element)
-    #         driver.execute_script("""
-    #             var select = document.getElementById('comboReferenciado');
-    #             var event = new Event('change', {bubbles: true});
-    #             select.dispatchEvent(event);
-    #         """)
-    #         time.sleep(0.5)
-            
-    #         valor_selecionado = driver.execute_script("return document.getElementById('comboReferenciado').value;")
-    #         if valor_selecionado == codigo:
-    #             logger.info(f"   [OK] METODO 4! Codigo {codigo} selecionado")
-    #             sucesso_js = True
-    #         else:
-    #             logger.warning(f"   [!] METODO 4 falhou. Valor: '{valor_selecionado}' != '{codigo}'")
-    #     except Exception as e:
-    #         logger.warning(f"   [!] METODO 4 exception: {e}")
-    
-    # # Verificação final
-    # if not sucesso_js:
-    #     logger.error("[X] TODOS OS METODOS FALHARAM!")
-    #     raise AutomacaoError(f"Impossivel selecionar codigo {codigo} - Todos os metodos falharam")
-    
-    # Debug: Mostra todas as options disponíveis
-    # try:
-    #     options = driver.execute_script("""
-    #         var select = document.getElementById('comboReferenciado');
-    #         var options = [];
-    #         for (var i = 0; i < select.options.length; i++) {
-    #             options.push(select.options[i].value + ': ' + select.options[i].text);
-    #         }
-    #         return options;
-    #     """)
-    #     logger.info(f"   [DEBUG] Options disponiveis: {options}")
-    # except:
-    #     pass
     
     time.sleep(1)
     
@@ -1057,17 +1020,19 @@ def main():
     print("=" * 60)
     print("AUTOMACAO BRADESCO SAUDE - DOWNLOAD DE GUIAS")
     print("=" * 60)
-    
-    # Usa as datas configuradas no início do código
-    data_inicial = DATA_INICIAL
-    data_final = DATA_FINAL
-    
-    # Validação de formato
-    if not validar_formato_data(data_inicial) or not validar_formato_data(data_final):
-        print("[X] Formato de data invalido nas configuracoes! Use DD/MM/AAAA")
-        input("\nENTER para finalizar...")
-        return
-    
+
+    while True:
+        data_inicial = input("\nData inicial (DD/MM/AAAA): ").strip()
+        if validar_formato_data(data_inicial):
+            break
+        print("[X] Formato invalido. Use DD/MM/AAAA")
+
+    while True:
+        data_final = input("Data final   (DD/MM/AAAA): ").strip()
+        if validar_formato_data(data_final):
+            break
+        print("[X] Formato invalido. Use DD/MM/AAAA")
+
     logger.info(f"Periodo configurado: {data_inicial} ate {data_final}")
     
     driver = None
