@@ -115,7 +115,6 @@ def verificar_e_tratar_erro_interno(driver, aba_trabalho):
                 try:
                     botao_voltar = driver.find_element(By.XPATH, "//button[contains(@onclick, 'fnVoltar') or contains(text(), 'Voltar')]")
                     driver.execute_script("arguments[0].click();", botao_voltar)
-                    logger.info("[OK] Botao 'Voltar' clicado")
                     time.sleep(2)
                     
                     driver.switch_to.window(aba_trabalho)
@@ -171,10 +170,9 @@ def verificar_e_fechar_modal_erro(driver):
                         mensagem = modal_parent.text.strip()[:200]
                         logger.warning(f"[!] Modal de erro: {mensagem}")
                     except:
-                        logger.warning(f"[!] Modal de erro detectado")
+                        logger.warning(f"[!] Modal detectado")
                     
                     driver.execute_script("arguments[0].click();", botao_fechar)
-                    logger.info("[OK] Modal fechado automaticamente")
                     time.sleep(0.5)
                     return True
             except (NoSuchElementException, Exception):
@@ -342,8 +340,8 @@ def renomear_guia_sadt_imediato(nome_base, max_tentativas=20):
                     try:
                         arquivo_guia.rename(destino)
                         tamanho_kb = destino.stat().st_size / 1024
-                        logger.info(f"   [OK] Renomeado com sucesso: {nome_final} ({tamanho_kb:.1f} KB)")
-                        logger.info(f"   [i] Total de guias deste paciente: {numero_guia}")
+                        logger.info(f" [OK] Renomeado: {nome_final} ({tamanho_kb:.1f} KB)")
+                        logger.info(f" [i] Total de guias do paciente: {numero_guia}")
                         return True
                     except PermissionError:
                         if retry < 4:
@@ -633,34 +631,68 @@ def nova_consulta(driver, data_inicial, data_final):
         except TimeoutException:
             pass  # Indicador nao apareceu, continua direto para verificar tabela
         
-        # Aguarda a tabela de resultados carregar
-        try:
-            WebDriverWait(driver, TIMEOUT_MEDIO).until(
-                EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
-            )
-            # logger.info("[OK] Resultados carregados")
-        except TimeoutException:
-            logger.warning("[!] Tabela nao encontrada, verificando iframe...")
-            # Verifica se há um iframe
-            iframes = driver.find_elements(By.TAG_NAME, "iframe")
-            if iframes:
-                logger.info(f"   [i] Encontrado(s) {len(iframes)} iframe(s), tentando mudar para o primeiro...")
-                driver.switch_to.frame(iframes[0])
-                try:
-                    WebDriverWait(driver, TIMEOUT_MEDIO).until(
-                        EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
+        # Aguarda a tabela de resultados carregar (com retry via reload em caso de timeout)
+        tabela_carregada = False
+        for tentativa_carga in range(2):
+            try:
+                WebDriverWait(driver, TIMEOUT_MEDIO).until(
+                    EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
+                )
+                tabela_carregada = True
+                break
+            except TimeoutException:
+                if tentativa_carga == 0:
+                    logger.warning("[!] Timeout aguardando tabela. Recarregando pagina...")
+                    driver.refresh()
+                    WebDriverWait(driver, TIMEOUT_LONGO).until(
+                        lambda d: d.execute_script("return document.readyState") == "complete"
                     )
-                    logger.info("[OK] Resultados encontrados dentro do iframe")
-                except TimeoutException:
-                    driver.switch_to.default_content()
-                    logger.error("[X] Tabela nao encontrada nem no iframe")
-                    logger.info(f"URL atual: {driver.current_url}")
-                    raise
-            else:
-                logger.error("[X] Nenhum iframe encontrado e tabela nao carregou")
-                logger.info(f"URL atual: {driver.current_url}")
-                raise
-        
+                    time.sleep(2)
+                    # Tenta nova consulta novamente após o reload
+                    try:
+                        nova_consulta_btn2 = WebDriverWait(driver, TIMEOUT_MEDIO).until(
+                            EC.element_to_be_clickable((By.XPATH, "//img[@alt='Nova Consulta' or @title='Nova Consulta']"))
+                        )
+                        driver.execute_script("arguments[0].click();", nova_consulta_btn2)
+                        time.sleep(1)
+                        campo_de2 = WebDriverWait(driver, TIMEOUT_MEDIO).until(
+                            EC.presence_of_element_located((By.ID, "periodoDe"))
+                        )
+                        driver.execute_script("arguments[0].value = arguments[1];", campo_de2, data_inicial)
+                        campo_ate2 = WebDriverWait(driver, TIMEOUT_MEDIO).until(
+                            EC.presence_of_element_located((By.ID, "periodoAte"))
+                        )
+                        driver.execute_script("arguments[0].value = arguments[1];", campo_ate2, data_final)
+                        consultar_btn2 = WebDriverWait(driver, TIMEOUT_MEDIO).until(
+                            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Consultar')]"))
+                        )
+                        driver.execute_script("arguments[0].click();", consultar_btn2)
+                        logger.info("[OK] Consulta re-executada apos reload")
+                    except Exception as e_reload:
+                        logger.error(f"[X] Falha ao re-consultar apos reload: {e_reload}")
+                        raise TimeoutException("Tabela nao carregou mesmo apos reload")
+                else:
+                    logger.warning("[!] Tabela nao encontrada, verificando iframe...")
+                    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+                    if iframes:
+                        logger.info(f"   [i] Encontrado(s) {len(iframes)} iframe(s), tentando mudar para o primeiro...")
+                        driver.switch_to.frame(iframes[0])
+                        try:
+                            WebDriverWait(driver, TIMEOUT_MEDIO).until(
+                                EC.presence_of_element_located((By.XPATH, "//tr[@class='even' or @class='odd']"))
+                            )
+                            logger.info("[OK] Resultados encontrados dentro do iframe")
+                            tabela_carregada = True
+                        except TimeoutException:
+                            driver.switch_to.default_content()
+                            logger.error("[X] Tabela nao encontrada nem no iframe")
+                            logger.info(f"URL atual: {driver.current_url}")
+                            raise
+                    else:
+                        logger.error("[X] Nenhum iframe encontrado e tabela nao carregou")
+                        logger.info(f"URL atual: {driver.current_url}")
+                        raise
+
     except (TimeoutException, NoSuchElementException) as e:
         logger.error(f"[X] Erro na consulta: {e}")
         raise
@@ -787,7 +819,7 @@ def processar_guia(driver, linha, indice, total, aba_trabalho):
         if not sucesso:
             logger.warning(f"   [X] Falha ao baixar PDF")
         else:
-            logger.info(f"   [***] Guia salva com sucesso!")
+            logger.info(f" [***] Guia salva!")
         
         # Fecha about:blank
         time.sleep(0.5)
@@ -854,14 +886,17 @@ def verificar_e_recarregar_tabela(driver, total_esperado, data_inicial, data_fin
             # Executa nova consulta
             nova_consulta(driver, data_inicial, data_final)
             time.sleep(2)
-            
+
+            # Clica no botão "Mais+" para carregar todas as guias novamente
+            carregar_todas_as_guias(driver)
+
             # Verifica se recarregou corretamente
             guias_recarregadas = driver.find_elements(
                 By.XPATH,
                 "//tr[(@class='even' or @class='odd') and td[contains(., 'Liberada')]]"
             )
             total_recarregado = len(guias_recarregadas)
-            
+
             if total_recarregado == total_esperado:
                 logger.info(f"[OK] Tabela recarregada com sucesso! {total_recarregado} guias")
                 return True
