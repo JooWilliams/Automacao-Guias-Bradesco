@@ -35,13 +35,15 @@ guias_por_paciente = {}
 guias_processadas = set()
 
 # Configuração de logging
+_handler_arquivo = logging.FileHandler(PASTA_DOWNLOADS / 'automacao_bradesco.log', encoding='utf-8')
+_handler_arquivo.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+_handler_cmd = logging.StreamHandler()
+_handler_cmd.setFormatter(logging.Formatter('%(message)s'))
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(PASTA_DOWNLOADS / 'automacao_bradesco.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    handlers=[_handler_arquivo, _handler_cmd]
 )
 logger = logging.getLogger(__name__)
 
