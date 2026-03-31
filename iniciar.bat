@@ -1,4 +1,5 @@
 @echo off
+mode con cols=80 lines=30
 chcp 65001 >nul
 echo ============================================================
 echo  AUTOMACAO GUIAS BRADESCO SAUDE
