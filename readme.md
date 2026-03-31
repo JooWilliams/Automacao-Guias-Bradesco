@@ -1,387 +1,195 @@
-# 🏥 Automação de Download de Guias - Bradesco Saúde
+# Automação Guias Bradesco Saúde
 
-> Um robô inteligente que baixa automaticamente suas guias do portal Bradesco Saúde, salvando horas de trabalho manual!
+Automatiza o download de guias SADT do portal Bradesco Saúde via Selenium, com controle de duplicatas por hash MD5.
+---
+## Requisitos
+
+- Python 3.7+
+- Google Chrome instalado
+- Selenium (instalado via `requirements.txt`)
 
 ---
 
-## 📖 A História Por Trás do Projeto
-
-Imagine ter que entrar no portal do Bradesco Saúde todos os dias e baixar dezenas (ou centenas!) de guias médicas, uma por uma. Clicar, esperar carregar, salvar, renomear... e repetir isso 100 vezes. 😫
-
-Foi exatamente isso que motivou a criação desta automação! O que antes levava horas, agora leva minutos. O robô faz todo o trabalho chato enquanto você toma um café. ☕
-
----
-
-## ✨ O Que Este Robô Faz?
-
-- 🔐 Conecta-se ao seu Chrome já logado (sem precisar de senha!)
-- 📅 Busca guias por período (você escolhe as datas)
-- 🔍 Encontra todas as guias com status "Liberada"
-- 📥 Baixa os PDFs automaticamente
-- 📝 Renomeia os arquivos com o nome do beneficiário
-- 🔄 Se o site "travar", ele recarrega e continua de onde parou
-- 🛡️ Evita baixar a mesma guia duas vezes
-- 📊 Mostra logs detalhados de tudo que está fazendo
-
----
-
-## 🚀 Como Usar (Passo a Passo)
-
-### 1️⃣ Preparação Inicial
-
-#### **Instale o Python** (se ainda não tiver)
-- Baixe em: [python.org](https://www.python.org/downloads/)
-- Durante a instalação, marque "Add Python to PATH" ✅
-
-#### **Instale as Bibliotecas Necessárias**
-Abra o terminal (CMD ou PowerShell) e digite:
+## Instalação
 
 ```bash
-pip install selenium
+# Clone ou baixe o repositório, então instale as dependências:
+pip install -r requirements.txt
 ```
 
-#### **Instale o ChromeDriver**
-O Selenium precisa do ChromeDriver para controlar o Chrome:
-- Baixe em: [chromedriver.chromium.org](https://chromedriver.chromium.org/downloads)
-- Escolha a versão compatível com seu Chrome
-- Extraia e coloque na mesma pasta do script
+O `requirements.txt` contém:
+
+```
+selenium
+```
+
+> O Selenium já inclui o ChromeDriver embutido (versão 4.x+). Não é necessário baixar o ChromeDriver separadamente.
 
 ---
 
-### 2️⃣ Configuração do Código
+## Como Usar
 
-Abra o arquivo Python e ajuste estas linhas:
+### Opção 1 — Via arquivo `.bat` (recomendado)
+
+Dê dois cliques em **`iniciar.bat`** ou execute pelo CMD:
+
+```cmd
+iniciar.bat
+```
+
+O script faz automaticamente:
+1. Abre o Chrome em modo debug na porta `9223` com perfil isolado
+2. Aguarda você fazer login no portal Bradesco Saúde
+3. Após pressionar ENTER, inicia a automação
+
+### Opção 2 — Manual via CMD
+
+```cmd
+REM 1. Abra o Chrome com debug habilitado
+chrome.exe --remote-debugging-port=9223 --user-data-dir="C:\temp\chrome"
+
+REM 2. Faça login no portal Bradesco Saúde no Chrome que abriu
+
+REM 3. Execute o script
+python script2.py
+```
+
+---
+
+## Configuração
+
+Edite as constantes no início do `script2.py`:
 
 ```python
-# Códigos dos convênios que você quer processar
-CODIGOS = ["0000994402"]  # Coloque seu(s) código(s) aqui
-```
+# Códigos dos prestadores a processar
+CODIGOS = ["0000994402"]
 
-Se você tem mais de um código, adicione assim:
-```python
-CODIGOS = ["0000994402", "0000123456", "0000789012"]
+# Período de busca (formato DD/MM/AAAA)
+DATA_INICIAL = "18/03/2026"
+DATA_FINAL   = "18/03/2026"
+
+# Timeouts (em segundos)
+TIMEOUT_CURTO = 10
+TIMEOUT_MEDIO = 20
+TIMEOUT_LONGO = 40
 ```
 
 ---
 
-### 3️⃣ Executando a Automação
+## Onde os arquivos são salvos
 
-#### **Passo 1: Abra o Chrome em Modo Debug**
-No terminal (CMD), digite:
+Os PDFs são salvos na pasta **Downloads** do usuário (`~/Downloads`), com nome no formato:
 
-```bash
-chrome.exe --remote-debugging-port=9222 --user-data-dir="C:\selenium-chrome"
+```
+NOME_PACIENTE_1.pdf
+NOME_PACIENTE_2.pdf
+NOME_PACIENTE_3.pdf
 ```
 
-> 💡 **Dica:** Crie um arquivo `.bat` com esse comando para facilitar!
+O log de execução é salvo em:
 
-#### **Passo 2: Faça Login no Portal**
-No Chrome que abriu:
-1. Acesse o portal Bradesco Saúde
-2. Faça login normalmente
-3. **Deixe essa janela aberta!** O robô vai usar essa sessão
-
-#### **Passo 3: Execute o Script**
-Em outro terminal, na pasta do script:
-
-```bash
-python automacao_bradesco.py
 ```
-
-#### **Passo 4: Informe as Datas**
-O script vai perguntar:
+~/Downloads/automacao_bradesco.log
 ```
-Data inicial (DD/MM/AAAA): 01/11/2024
-Data final (DD/MM/AAAA): 30/11/2024
-```
-
-#### **Passo 5: Relaxe! ☕**
-O robô vai fazer todo o resto! Você pode acompanhar pelos logs.
 
 ---
 
-## 🎬 Como Funciona Por Dentro?
+## Sistema de ID Único (Anti-Duplicata)
 
-### **Etapa 1: Conexão** 🔌
-```
-[+] Conectando ao Chrome existente...
-[OK] Conectado com sucesso!
-```
-O robô conecta ao Chrome que você já abriu e logou.
+Cada guia recebe um ID gerado a partir de:
 
----
-
-### **Etapa 2: Navegação** 🧭
-```
-[>>] ETAPA 1: Acessando 'Servicos' > 'Senha Web'...
-[OK] Menu 'Servicos' aberto
-[OK] 'Senha Web' clicado
-```
-Navega automaticamente pelos menus do portal.
-
----
-
-### **Etapa 3: Seleção de Código** 🔑
-```
-[>>] ETAPA 2: Selecionando codigo 0000994402...
-[OK] Codigo 0000994402 selecionado
-[OK] Botao 'Continuar' clicado
-```
-Seleciona o convênio correto.
-
----
-
-### **Etapa 4: Nova Consulta** 📅
-```
-[>>] ETAPA 3: Realizando nova consulta (01/11/2024 ate 30/11/2024)...
-[OK] 'Nova Consulta' clicado
-[OK] Data inicial: 01/11/2024
-[OK] Data final: 30/11/2024
-[OK] Botao 'Consultar' clicado
-[OK] Resultados carregados
-```
-Busca as guias no período que você escolheu.
-
----
-
-### **Etapa 5: Processamento** 🔄
-```
-[i] 100 guia(s) 'Liberada' encontrada(s)
-
-============================================================
-[1/100] PROCESSANDO: JOAO SILVA
-   Arquivo: JOAO_SILVA
-============================================================
-   [OK] Linha selecionada
-   [i] 'Informacoes do Beneficiario' clicado
-   [i] Botao 'PDF' clicado - download INSTANTANEO
-   [OK] GuiaSADT.pdf encontrado!
-   [OK] Renomeado: JOAO_SILVA_1.pdf (145.3 KB)
-   [***] Guia salva com sucesso!
-   [<-] Voltou a tabela
-```
-
-Para cada guia, o robô:
-1. Seleciona a linha
-2. Clica em "Informações do Beneficiário"
-3. Clica em "PDF"
-4. Captura o download instantâneo
-5. Renomeia com o nome do paciente
-6. Volta para a tabela
-7. Vai para a próxima!
-
----
-
-### **Etapa 6: Proteção Contra Erros** 🛡️
-
-Se o site "perder" guias da tabela:
-
-```
-[!] INCONSISTENCIA DETECTADA!
-    Esperado: 100 guias | Encontrado: 87 guias
-
-[>>] Tentativa 1/3: Recarregando tabela...
-[>>] ETAPA 3: Realizando nova consulta (01/11/2024 ate 30/11/2024)...
-[OK] Tabela recarregada! Continuando do indice atual...
-
-[39/100] PROCESSANDO: ANA LIMA ✅
-```
-
-O robô:
-- Detecta que algo deu errado
-- Recarrega a tabela automaticamente
-- Continua de onde parou (não perde progresso!)
-
----
-
-## 📂 Onde os Arquivos São Salvos?
-
-Os PDFs vão para sua pasta **Downloads** com nomes organizados:
-
-```
-📁 Downloads/
-   📄 JOAO_SILVA_1.pdf
-   📄 JOAO_SILVA_2.pdf
-   📄 MARIA_SANTOS_1.pdf
-   📄 PEDRO_COSTA_1.pdf
-   ...
-```
-
-Se o mesmo paciente tiver várias guias, elas são numeradas automaticamente!
-
----
-
-## 🎯 Recursos Especiais
-
-### 🔢 **Numeração Inteligente**
-Se "João Silva" tem 3 guias, você terá:
-- `JOAO_SILVA_1.pdf`
-- `JOAO_SILVA_2.pdf`
-- `JOAO_SILVA_3.pdf`
-
-### 🚫 **Anti-Duplicação**
-O robô lembra quais guias já baixou. Mesmo se você rodar o script de novo, ele não baixa duplicados!
-
-### 📝 **Log Completo**
-Tudo é registrado no arquivo `automacao_bradesco.log` na pasta Downloads.
-
-### 🔄 **Auto-Recuperação**
-Se o site travar ou dar erro, o robô tenta:
-1. Fechar popups de erro
-2. Recarregar a página
-3. Continuar de onde parou
-
----
-
-## ⚙️ Configurações Avançadas
-
-### **Alterar Timeouts**
-Se sua internet é lenta, aumente os tempos de espera:
+- Conteúdo das 8 colunas da linha da tabela
+- Timestamp com microsegundos
+- Hash MD5 (16 caracteres)
 
 ```python
-TIMEOUT_CURTO = 10   # Era 10, tente 15
-TIMEOUT_MEDIO = 20   # Era 20, tente 30
-TIMEOUT_LONGO = 30   # Era 30, tente 45
+# Resultado: NomeCurto_a3f9e2b4c1d5e6f7
+id_final = f"{nome_curto}_{id_hash}"
 ```
 
-### **Alterar Pasta de Downloads**
-Por padrão usa `C:\Users\SeuUsuario\Downloads`. Para mudar:
+Guias já processadas na mesma execução são ignoradas automaticamente:
 
+```log
+*** PULANDO (JA PROCESSADA) ***
+```
+
+---
+
+## Funções Principais
+
+| Função | Descrição |
+|---|---|
+| `gerar_id_unico_robusto()` | Gera hash MD5 único por guia |
+| `renomear_guia_sadt_imediato()` | Aguarda e renomeia `GuiaSADT.pdf` com nome do paciente |
+| `verificar_e_tratar_erro_interno()` | Detecta erros do portal e clica em Voltar |
+| `verificar_e_fechar_modal_erro()` | Fecha modais de erro automaticamente |
+| `fechar_aba_about_blank()` | Fecha abas temporárias abertas pelo Chrome |
+| `aguardar_e_clicar()` | Clica em elementos com scroll e retry |
+| `validar_formato_data()` | Valida datas no formato DD/MM/AAAA |
+| `limpar_nome_arquivo()` | Remove caracteres inválidos do nome do PDF |
+
+---
+
+## Logs
+
+Exemplo de execução bem-sucedida:
+
+```log
+2026-03-18 14:30:25 - INFO - ============================================================
+2026-03-18 14:30:25 - INFO - [1/3] PROCESSANDO: JOÃO DA SILVA
+2026-03-18 14:30:25 - INFO -    ID: JOAO_DA_SILVA_a3f9e2b4c1d5
+2026-03-18 14:30:26 - INFO -  [OK] Renomeado: JOAO_DA_SILVA_1.pdf (45.2 KB)
+2026-03-18 14:30:26 - INFO -  [i] Total de guias do paciente: 1
+```
+
+Marcadores nos logs:
+
+| Marcador | Significado |
+|---|---|
+| `[OK]` | Operação concluída com sucesso |
+| `[i]` | Informação de progresso |
+| `[!]` | Aviso (erro recuperável) |
+| `[X]` | Erro crítico |
+| `[DEBUG]` | Dados internos para diagnóstico |
+
+---
+
+## Troubleshooting
+
+**Chrome não conecta:**
+- Verifique se o Chrome abriu com a porta `9223`
+- Use o `iniciar.bat` para garantir os parâmetros corretos
+
+**`GuiaSADT.pdf` não encontrado:**
+- O portal pode estar instável; o script tenta novamente na próxima execução
+- Verifique se o download não foi bloqueado pelo Chrome
+
+**Logs muito grandes:**
 ```python
-PASTA_DOWNLOADS = Path("C:/MinhaPasta/Guias")
+# Altere o nível no script2.py:
+logging.basicConfig(level=logging.WARNING)
 ```
 
-### **Processar Múltiplos Códigos**
-```python
-CODIGOS = [
-    "0000994402",
-    "0000123456",
-    "0000789012"
-]
-```
-
-O robô vai processar todos, um por vez!
+**Python não encontrado (ao usar o .bat):**
+- Instale o Python em [python.org](https://python.org) marcando a opção **"Add to PATH"**
 
 ---
 
-## 🐛 Solução de Problemas
+## Checklist
 
-### ❌ "Chrome não tem janelas abertas"
-**Solução:** Abra o Chrome com o comando debug antes de rodar o script.
+Antes de executar:
 
-### ❌ "Elemento não encontrado"
-**Solução:** O site pode ter mudado. Verifique se você está logado e na página correta.
+- [ ] `requirements.txt` instalado (`pip install -r requirements.txt`)
+- [ ] `CODIGOS` configurado em `script2.py`
+- [ ] Datas configuradas em `DATA_INICIAL` e `DATA_FINAL`
+- [ ] Espaço disponível na pasta Downloads
 
-### ❌ "GuiaSADT.pdf não encontrado"
-**Solução:** 
-- Verifique se o Chrome está configurado para baixar PDFs automaticamente
-- Certifique-se de que a pasta Downloads existe
+Após executar:
 
-### ❌ "Timeout: Tabela não carregou"
-**Solução:** Sua internet pode estar lenta. Aumente o `TIMEOUT_MEDIO` para 30 ou 40.
-
----
-
-## 📊 Estatísticas de Uso
-
-Depois de terminar, você verá:
-
-```
-[***] Concluido! 98/100 baixadas
-[i] Guias unicas processadas: 98
-
-============================================================
-CONCLUIDO!
-Arquivos salvos em: C:\Users\SeuNome\Downloads
-============================================================
-```
-
-Isso significa:
-- ✅ 98 guias baixadas com sucesso
-- ❌ 2 guias tiveram erro (podem estar já baixadas ou inacessíveis)
-- 📁 Tudo salvo na pasta Downloads
+- [ ] Verificar `[***] Concluido! X/Y baixadas` no log
+- [ ] Conferir PDFs na pasta Downloads
+- [ ] Revisar o log em busca de `[X]` ou `[!]`
 
 ---
 
-## 🎓 Dicas de Uso
-
-### 💡 **Melhor Horário**
-Rode a automação fora do horário de pico (antes das 8h ou após 18h) para evitar lentidão do site.
-
-### 💡 **Períodos Menores**
-Em vez de buscar 1 mês inteiro, divida em períodos menores (1 semana) para mais estabilidade.
-
-### 💡 **Mantenha o Chrome Aberto**
-Não feche o Chrome durante a automação! Deixe minimizado se quiser.
-
-### 💡 **Acompanhe os Logs**
-Fique de olho no terminal. Se aparecer muitos erros seguidos, pare (Ctrl+C) e tente novamente.
-
----
-
-## 🔒 Segurança
-
-✅ **Seus dados estão seguros:**
-- O script não envia nada para fora
-- Usa sua sessão já logada do Chrome
-- Não guarda senhas
-- Todo o processamento é local
-
----
-
-## 🤝 Contribuições
-
-Este projeto nasceu da necessidade real de automatizar um trabalho repetitivo. Se você tiver sugestões de melhorias:
-
-1. Teste a mudança
-2. Documente o que fez
-3. Compartilhe! 🚀
-
----
-
-## 📞 Precisa de Ajuda?
-
-Se encontrar problemas:
-1. Verifique se seguiu todos os passos
-2. Leia a seção "Solução de Problemas"
-3. Verifique o arquivo `automacao_bradesco.log`
-4. Teste com um período menor (1 dia) primeiro
-
----
-
-## 🎉 Aproveite!
-
-Agora você tem um assistente robótico que trabalha para você! 
-
-Enquanto ele baixa as guias, você pode:
-- ☕ Tomar um café
-- 📧 Responder emails
-- 🚶 Dar uma volta
-- 😴 Ou só descansar!
-
-**Tempo economizado = Qualidade de vida! 🌟**
-
----
-
-## 📝 Notas da Versão
-
-**Versão Atual: 2.0**
-
-### ✨ Novidades:
-- ✅ Busca por período com datas personalizadas
-- ✅ Auto-recuperação quando o site perde guias
-- ✅ Sistema anti-duplicação melhorado
-- ✅ Logs mais detalhados e amigáveis
-- ✅ Tratamento robusto de erros
-- ✅ Download instantâneo e renomeação automática
-
-### 🔧 Correções:
-- 🐛 Corrigido problema de abas about:blank
-- 🐛 Melhorado tratamento de erros internos do Bradesco
-- 🐛 Corrigido loop infinito em caso de falha
-
----
-
-**Desenvolvido com ❤️ para facilitar a vida de quem trabalha com guias médicas**
-
-*Última atualização: Outubro 2024*
+**Versão:** 2.0 | **Python:** 3.7+ | **Selenium:** 4.x
